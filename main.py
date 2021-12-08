@@ -51,6 +51,7 @@ class VoiceChannelInfo:
 		self.stream_process = None
 
 play_keywords = ["p", "play"]
+lyrics_keywords = ["l", "lyrics"]
 disconnect_keywords = ["d", "disc", "disconnect"]
 help_keywords = ["?", "h", "help"]
 
@@ -81,6 +82,8 @@ class DSSClient(discord.Client):
 			author = message.author
 			channel = message.channel
 
+			print("%s said:\n\t\"%s\"" % (author.name, message.content))
+
 			#Check if we already have a voice client in the author's channel
 			#voice_client becomes None if we don't
 			voice_channel_info = voice_info_from_author(self.voice_channel_infos, author)
@@ -103,6 +106,7 @@ class DSSClient(discord.Client):
 							if guild_channel.id == author.voice.channel.id:
 								await channel.send("Joining voice channel \"%s\"..." % guild_channel.name)
 								voice_channel_info = VoiceChannelInfo(await guild_channel.connect())
+								await message.guild.change_voice_state(channel=voice_channel_info.voice_client.channel, self_mute=False, self_deaf=True)
 								self.voice_channel_infos.append(voice_channel_info)
 								break
 					else:
@@ -119,10 +123,12 @@ class DSSClient(discord.Client):
 						voice_channel_info.stream_process = subprocess.Popen(args=["youtube-dl", "-f", "bestaudio", "--quiet", "ytsearch:%s" % thing_to_play, "-o", "-"], stdout=subprocess.PIPE)
 
 					await channel.send("Finding \"%s\"..." % thing_to_play)
-					voice_channel_info.voice_client.play(discord.FFmpegPCMAudio(
+					audio_source = discord.FFmpegPCMAudio(
 						source=voice_channel_info.stream_process.stdout,
 						pipe=True
-					))
+					)
+					sleep(2)
+					voice_channel_info.voice_client.play(audio_source)
 
 				elif command == "debug":
 					await message.channel.send("Gotcha")
