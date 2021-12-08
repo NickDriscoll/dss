@@ -1,5 +1,11 @@
 import discord, subprocess, re
 from time import sleep
+
+#In the same directory as this main.py, keys.py shall contain a structure like this
+#auth_keys = {
+#	"bot_token" : "tokengoeshere",
+#	"bot_author_id" : "your_discord_user_id"
+#}
 from keys import auth_keys
 
 #URL to add bot:
