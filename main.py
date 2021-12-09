@@ -1,4 +1,5 @@
-import discord, subprocess, re
+import discord, subprocess, re, pafy
+from youtubesearchpython import VideosSearch
 from time import sleep
 
 #In the same directory as this main.py, keys.py shall contain a structure like this
@@ -39,12 +40,12 @@ def print_dicts(ds):
 	for d in ds:
 		print_dict(d)
 
-def voice_info_from_author(voice_channel_infos, author):
+def voice_info_from_author(author_voice_infos, author):
 	voice_info = None
 	if author.voice == None:
 		return None
 
-	for info in voice_channel_infos:
+	for info in author_voice_infos:
 		if author.voice.channel.id == info.voice_client.channel.id:
 			voice_info = info
 			break
@@ -64,11 +65,11 @@ help_keywords = ["?", "h", "help"]
 #This is the main class that subclasses Client
 #Each overridden method represents a Discord event we want to respond to
 class DSSClient(discord.Client):
-	voice_channel_infos = []
-
 	#Called when the client is done preparing the data received from Discord.
 	#Usually after login is successful and the Client.guilds and co. are filled up.
 	async def on_ready(self):
+		self.voice_channel_infos = []
+
 		print("Logged in as %s" % self.user)
 
 	#Called when someone begins typing a message.
@@ -92,7 +93,7 @@ class DSSClient(discord.Client):
 
 			#Check if we already have a voice client in the author's channel
 			#voice_client becomes None if we don't
-			voice_channel_info = voice_info_from_author(self.voice_channel_infos, author)
+			author_voice_info = voice_info_from_author(self.voice_channel_infos, author)
 
 			content = message.content[len(prelude):]
 			res = re.match(r"\s+([^\s]+)\s*(.*)", content)
@@ -107,34 +108,38 @@ class DSSClient(discord.Client):
 						await channel.send("<@%s> You must be in a voice channel to summon me." % author.id)
 						return
 
-					if voice_channel_info == None:
+					if author_voice_info == None:
 						for guild_channel in await message.guild.fetch_channels():
 							if guild_channel.id == author.voice.channel.id:
 								await channel.send("Joining voice channel \"%s\"..." % guild_channel.name)
-								voice_channel_info = VoiceChannelInfo(await guild_channel.connect())
-								await message.guild.change_voice_state(channel=voice_channel_info.voice_client.channel, self_mute=False, self_deaf=True)
-								self.voice_channel_infos.append(voice_channel_info)
+								author_voice_info = VoiceChannelInfo(await guild_channel.connect())
+								await message.guild.change_voice_state(channel=author_voice_info.voice_client.channel, self_mute=False, self_deaf=True)
+								self.voice_channel_infos.append(author_voice_info)
 								break
 					else:
-						client = voice_channel_info.voice_client
+						client = author_voice_info.voice_client
 						#if client.is_playing():
 
-						voice_channel_info.voice_client.stop()
+						author_voice_info.voice_client.stop()
 
 					#Play something
 					thing_to_play = res.group(2)
 					if re.search(r"^http[s]?://", thing_to_play):
-						voice_channel_info.stream_process = subprocess.Popen(args=["youtube-dl", "-f", "bestaudio", "--quiet", thing_to_play, "-o", "-"], stdout=subprocess.PIPE)
+						stream_url = pafy.new(thing_to_play).getbestaudio().url
+						await channel.send("Now playing %s..." % thing_to_play)
+						audio_source = discord.FFmpegPCMAudio(stream_url)
+						author_voice_info.voice_client.play(audio_source)
 					else:
-						voice_channel_info.stream_process = subprocess.Popen(args=["youtube-dl", "-f", "bestaudio", "--quiet", "ytsearch:%s" % thing_to_play, "-o", "-"], stdout=subprocess.PIPE)
+						await channel.send("Searching for \"%s\"..." % thing_to_play)
+						search = VideosSearch(thing_to_play, limit=1)
+						search_result = search.result()["result"][0]
 
-					await channel.send("Finding \"%s\"..." % thing_to_play)
-					audio_source = discord.FFmpegPCMAudio(
-						source=voice_channel_info.stream_process.stdout,
-						pipe=True
-					)
-					sleep(2)
-					voice_channel_info.voice_client.play(audio_source)
+						stream_url = pafy.new(search_result["link"]).getbestaudio().url
+						await channel.send("Now playing %s..." % search_result["link"])
+						audio_source = discord.FFmpegPCMAudio(stream_url)
+						author_voice_info.voice_client.play(audio_source)
+
+					
 
 				elif command == "debug":
 					await message.channel.send("Gotcha")
@@ -145,15 +150,14 @@ class DSSClient(discord.Client):
 						await channel.send("<@%s> You may not disconnect me when we're not even in the same room!" % author.id)
 						return
 
-					if voice_channel_info == None:
+					if author_voice_info == None:
 						await channel.send("I'm not currently connected to a voice channel.")
 					else:
 						await channel.send("Disconnecting...")
-						voice_channel_info.voice_client.stop()
-						voice_channel_info.stream_process.kill()
-						await voice_channel_info.voice_client.disconnect()
+						author_voice_info.voice_client.stop()
+						await author_voice_info.voice_client.disconnect()
 
-						self.voice_channel_infos.remove(voice_channel_info)
+						self.voice_channel_infos.remove(author_voice_info)
 
 				elif command in help_keywords:
 					dash_count = 30
