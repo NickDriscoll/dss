@@ -1,4 +1,4 @@
-import discord, pafy, re, sys
+import asyncio, discord, pafy, re, sys
 from collections import deque
 from youtubesearchpython import VideosSearch
 
@@ -227,7 +227,7 @@ class DSSClient(discord.Client):
 		#queue on the ones that need advancing
 		for info in self.voice_channel_infos:
 			if not info.voice_client.is_playing():
-				self.loop.run_until_complete(advance_song_queue(self, info))
+				asyncio.ensure_future(advance_song_queue(self, info), loop=self.loop)
 
 
 #Entry point
