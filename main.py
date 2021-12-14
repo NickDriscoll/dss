@@ -122,10 +122,6 @@ class DSSClient(discord.Client):
 
 	#Called when a message is sent in a guild of which the bot is a member
 	async def on_message(self, message):
-		#Check for blank message
-		if message.content == "":
-			return
-
 		#Most messages will make this statement false
 		if message.content[0:len(prelude)].lower() == prelude:
 			author = message.author
@@ -220,15 +216,16 @@ class DSSClient(discord.Client):
 	async def on_message_edit(self, before, after):
 		print("Message edited:\nBefore: %s\nAfter: %s" % (before.content, after.content))
 
+	#Callback that is called when an AudioSource is exhausted or has an error
 	def after_audio(self, error):
-		print("the error is %s" % error)
+		if error != None:
+			print("after_audio error: %s" % error)
 
 		#Go through all open voice connections and advance the
 		#queue on the ones that need advancing
 		for info in self.voice_channel_infos:
 			if not info.voice_client.is_playing():
 				asyncio.ensure_future(advance_song_queue(self, info), loop=self.loop)
-
 
 #Entry point
 def main():
@@ -245,6 +242,10 @@ def main():
 	elif env == "dev":
 		bot_key = auth_keys["bot_token_dev"]
 		prelude = "!dssd"
+	else:
+		print("You must pass either \"dev\" or \"prod\" as a parameter")
+		exit(0)
+		
 
 	print("Logging in...")
 
