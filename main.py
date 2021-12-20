@@ -1,3 +1,6 @@
+# Title: Driscoll's Sound Streamer (DSS)
+# Author: Nick Driscoll
+
 import asyncio, discord, pafy, re, sys
 from collections import deque
 from youtubesearchpython import VideosSearch
@@ -49,7 +52,7 @@ lyrics_keywords = ["l", "lyrics"]
 disconnect_keywords = ["d", "disc", "disconnect"]
 help_keywords = ["?", "h", "help"]
 
-#Create the manual message
+#Define the manual message
 dash_count = 30
 man_message = "%s**D**riscoll's **S**ound **S**treamer%s\n\n" % ('-'*dash_count, '-'*dash_count)
 man_message += "I am a music bot that can stream music from YouTube given a direct URL or search query.\n\n"
@@ -59,17 +62,6 @@ man_message += "\tTo toggle music playback (pausing):\n\t\t\"!dss pause|unpause\
 man_message += "\tTo expel me from the channel you're in:\n\t\t\"!dss d|disc|disconnect\"\n"
 man_message += "\tTo display this very help message:\n\t\t\"!dss ?|h|help\"\n"
 man_message += "\n\tContact <@%s> to report any issues or bugs." % auth_keys["bot_author_id"]
-
-def voice_info_from_author(voice_infos, author):
-	voice_info = None
-	if author.voice == None:
-		return None
-
-	for info in voice_infos:
-		if author.voice.channel.id == info.voice_client.channel.id:
-			voice_info = info
-			break
-	return voice_info
 
 def play_audio_url(client, voice_client, link):
 	stream_url = pafy.new(link).getbestaudio().url
@@ -100,11 +92,13 @@ async def advance_song_queue(client, voice_info):
 				play_audio_url(client, voice_info.voice_client, link)
 				await voice_info.message_channel.send("Now playing: %s" % link)
 
-class VoiceChannelInfo:
+#An instance of this class holds all the data
+#for an active voice connection
+class VoiceConnectionInfo:
 	def __init__(self, message_channel, voice_client):
 		self.voice_client = voice_client
-		self.message_channel = message_channel
-		self.song_deque = deque()
+		self.message_channel = message_channel	#The original text channel the bot was summoned with
+		self.song_deque = deque()				#Queue of songs to play
 
 #This is the main class that subclasses Client
 #Each overridden method represents a Discord event we want to respond to
@@ -112,7 +106,7 @@ class DSSClient(discord.Client):
 	#Called when the client is done preparing the data received from Discord.
 	#Usually after login is successful and the Client.guilds and co. are filled up.
 	async def on_ready(self):
-		self.voice_channel_infos = []
+		self.voice_connection_infos = []
 
 		print("Logged in as %s" % self.user)
 
@@ -131,7 +125,12 @@ class DSSClient(discord.Client):
 
 			#Check if we already have a voice client in the author's channel
 			#voice_client becomes None if we don't
-			voice_info = voice_info_from_author(self.voice_channel_infos, author)
+			voice_info = None
+			if author.voice != None:
+				for info in self.voice_connection_infos:
+					if author.voice.channel.id == info.voice_client.channel.id:
+						voice_info = info
+						break
 
 			#This regex defines the syntax of a legal bot command
 			res = re.match(r"\s+([^\s]+)\s*(.*)", message.content[len(prelude):])
@@ -150,12 +149,12 @@ class DSSClient(discord.Client):
 
 					#If we're not in the message author's voice channel
 					if voice_info == None:
-						for guild_channel in await message.guild.fetch_channels():
+						for guild_channel in message.guild.channels:
 							if guild_channel.id == author.voice.channel.id:
 								await channel.send("Joining voice channel \"%s\"..." % guild_channel.name)
-								voice_info = VoiceChannelInfo(channel, await guild_channel.connect())
+								voice_info = VoiceConnectionInfo(channel, await guild_channel.connect())
 								await message.guild.change_voice_state(channel=voice_info.voice_client.channel, self_mute=False, self_deaf=True)
-								self.voice_channel_infos.append(voice_info)
+								self.voice_connection_infos.append(voice_info)
 								break
 
 					thing_to_play = res.group(2)
@@ -163,18 +162,25 @@ class DSSClient(discord.Client):
 						voice_info.song_deque.append(thing_to_play)
 						await advance_song_queue(self, voice_info)
 					else:
-						await voice_info.message_channel.send("Searching for \"%s\"..." % thing_to_play)
-						link = url_from_query(thing_to_play)
-						await voice_info.message_channel.send("Queued: %s" % link)
-						voice_info.song_deque.append(link)
+						if re.search(r"^http[s]?://", thing_to_play):
+							voice_info.song_deque.append(thing_to_play)
+							await voice_info.message_channel.send("Queued: %s" % thing_to_play)
+						else:
+							await voice_info.message_channel.send("Searching for \"%s\"..." % thing_to_play)
+							link = url_from_query(thing_to_play)
+							voice_info.song_deque.append(link)
+							await voice_info.message_channel.send("Queued: %s" % link)
 
 				elif command in skip_keywords:
 					if voice_info == None:
 						await channel.send("<@%s> I'm not playing anything" % author.id)
 						return
 
-					voice_info.voice_client.stop()
-					await channel.send("Skipping...")
+					if voice_info.voice_client.is_playing():
+						await channel.send("Skipping...")
+						voice_info.voice_client.stop()
+					else:
+						await channel.send("<@%s> I'm not playing anything" % author.id)
 
 				elif command in pause_keywords:
 					if voice_info == None:
@@ -199,22 +205,22 @@ class DSSClient(discord.Client):
 						return
 
 					if voice_info == None:
-						await channel.send("I'm not even connected to a voice channel.")
+						await channel.send("<@%s> I'm not even connected to a voice channel." % author.id)
 					else:
 						await channel.send("Disconnecting...")
 						voice_info.voice_client.stop()
 						await voice_info.voice_client.disconnect()
-						self.voice_channel_infos.remove(voice_info)
+						self.voice_connection_infos.remove(voice_info)
 
 				elif command in help_keywords:
 					await channel.send(man_message)
 					
 				else:
-					await channel.send("Unrecognized command: \"%s\"\nenter \"!dss ?\" to display the manual" % command)
+					await channel.send("Unrecognized command: \"%s\"\nuse \"!dss ?\" to display the manual" % command)
 
 	#Called when a message is edited
 	async def on_message_edit(self, before, after):
-		print("Message edited:\nBefore: %s\nAfter: %s" % (before.content, after.content))
+		print("Message edited: %s" % (before.id))
 
 	#Callback that is called when an AudioSource is exhausted or has an error
 	def after_audio(self, error):
@@ -223,19 +229,23 @@ class DSSClient(discord.Client):
 
 		#Go through all open voice connections and advance the
 		#queue on the ones that need advancing
-		for info in self.voice_channel_infos:
+		for info in self.voice_connection_infos:
 			if not info.voice_client.is_playing():
 				asyncio.ensure_future(advance_song_queue(self, info), loop=self.loop)
 
 #Entry point
 def main():
+	#Getting environment arg
 	if len(sys.argv) < 2:
 		print("You must pass either \"dev\" or \"prod\" as a parameter")
 		exit(0)
 	env = sys.argv[1]
 
-	global prelude #Beginning part of message that lets us to know it's a command for us to interpret
-	bot_key = ""
+	print("Logging in...")
+
+	#Configure environment related variables
+	global prelude 				#Beginning part of message that lets us to know it's a command for us to interpret
+	bot_key = ""				#Secret token that authenticates the script to the bot account
 	if env == "prod":
 		bot_key = auth_keys["bot_token"]
 		prelude = "!dss"
@@ -245,9 +255,6 @@ def main():
 	else:
 		print("You must pass either \"dev\" or \"prod\" as a parameter")
 		exit(0)
-		
-
-	print("Logging in...")
 
 	#This dicord.Client derived object creates and maintains an asyncio loop
 	#which asynchronously dispatches the overridden methods when the relevant events occur
