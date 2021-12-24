@@ -13,32 +13,6 @@ from youtubesearchpython import VideosSearch
 #}
 from keys import auth_keys
 
-#-----Helper functions-----
-
-#Returns a pretty-printed dictionary
-def format_dict(d, indent=0):
-	s = "\t" * indent + "{\n"
-	for key, value in d.items():
-		if type(value) == type({}):
-			s += (indent + 1) * "\t" + "%s :\n%s" % (key, format_dict(value, indent+1))
-		else:
-			s += (indent + 1) * "\t" + "%s : %s\n" % (key, value)
-	s += "\t" * indent + "}\n"
-	return s
-
-#Returns many pretty-printed dictionaries
-def format_dicts(ds, indent=0):
-	ress = "\t" * indent + "[\n"
-	for d in ds:
-		ress += format_dict(d, indent + 1) + "\n"
-	ress += "\t" * indent + "]\n"		
-	return ress
-
-def print_dict(d, indent=0):
-	print(format_dict(d, indent))
-
-#--------------------------
-
 #The valid keywords to trigger each command
 play_keywords = ["p", "play"]
 pause_keywords = ["pause", "unpause"]
@@ -71,8 +45,7 @@ def url_from_query(query):
 		result = search_results[0]
 		return result["link"]
 
-#An instance of this class holds all the data
-#for an active voice connection
+#An instance of this class holds all the data for an active voice connection
 class VoiceConnectionInfo:
 	def __init__(self, message_channel, voice_client):
 		self.voice_client = voice_client		#Voice client to 
@@ -140,14 +113,18 @@ class DSSClient(discord.Client):
 				await channel.send("<@%s> You must be in a voice channel to summon me." % author.id)
 				return
 
-			#If we're not in the message author's voice channel
+			#If we're not in the message author's voice channel, join it
 			if voice_info == None:
 				for guild_channel in message.guild.channels:
 					if guild_channel.id == author.voice.channel.id:
 						await channel.send("Joining voice channel \"%s\"..." % guild_channel.name)
+
+						#Initialize voice connection info
 						voice_info = VoiceConnectionInfo(channel, await guild_channel.connect())
-						await message.guild.change_voice_state(channel=voice_info.voice_client.channel, self_mute=False, self_deaf=True)
 						self.voice_connection_infos.append(voice_info)
+
+						#Deafen ourself
+						await message.guild.change_voice_state(channel=voice_info.voice_client.channel, self_mute=False, self_deaf=True)
 						break
 
 			#Everything after the command is interpreted as the url/query
