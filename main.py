@@ -8,6 +8,7 @@ from youtubesearchpython import VideosSearch
 #In the same directory as this main.py, keys.py shall contain a structure like this
 #auth_keys = {
 #	"bot_token" : "tokengoeshere",
+#	"bot_token_dev" : "devbottokenid",
 #	"bot_author_id" : "your_discord_user_id"
 #}
 from keys import auth_keys
@@ -18,6 +19,7 @@ def list_fields(ob):
 	for i in dir(ob):
 		print(i)
 
+#Returns a pretty-printed dictionary
 def format_dict(d, indent=0):
 	s = "\t" * indent + "{\n"
 	for key, value in d.items():
@@ -28,6 +30,7 @@ def format_dict(d, indent=0):
 	s += "\t" * indent + "}\n"
 	return s
 
+#Returns many pretty-printed dictionaries
 def format_dicts(ds, indent=0):
 	ress = "\t" * indent + "[\n"
 	for d in ds:
@@ -55,13 +58,16 @@ help_keywords = ["?", "h", "help"]
 #Define the manual message
 dash_count = 30
 man_message = "%s**D**riscoll's **S**ound **S**treamer%s\n\n" % ('-'*dash_count, '-'*dash_count)
-man_message += "I am a music bot that can stream music from YouTube given a direct URL or search query.\n\n"
+man_message += "I am a music bot that can stream audio from a YouTube video given a direct URL or search query.\n\n"
 man_message += "\tTo summon me to play/queue something:\n\t\t\"!dss play|p <url or query>\"\n"
 man_message += "\tTo skip to the next queued track:\n\t\t\"!dss n|next|s|skip\"\n"
 man_message += "\tTo toggle music playback (pausing):\n\t\t\"!dss pause|unpause\"\n"
 man_message += "\tTo expel me from the channel you're in:\n\t\t\"!dss d|disc|disconnect\"\n"
 man_message += "\tTo display this very help message:\n\t\t\"!dss ?|h|help\"\n"
 man_message += "\n\tContact <@%s> to report any issues or bugs." % auth_keys["bot_author_id"]
+
+#Regex used to determine if a string is a URL
+URL_REGEX = r"^http[s]?://"
 
 def play_audio_url(client, voice_client, link):
 	stream_url = pafy.new(link).getbestaudio().url
@@ -80,7 +86,7 @@ def url_from_query(query):
 async def advance_song_queue(client, voice_info):
 	if len(voice_info.song_deque) > 0:
 		thing_to_play = voice_info.song_deque.popleft()
-		if re.search(r"^http[s]?://", thing_to_play):
+		if re.search(URL_REGEX, thing_to_play):
 			play_audio_url(client, voice_info.voice_client, thing_to_play)
 			await voice_info.message_channel.send("Now playing: %s" % thing_to_play)
 		else:
@@ -96,7 +102,7 @@ async def advance_song_queue(client, voice_info):
 #for an active voice connection
 class VoiceConnectionInfo:
 	def __init__(self, message_channel, voice_client):
-		self.voice_client = voice_client
+		self.voice_client = voice_client		#Voice client to 
 		self.message_channel = message_channel	#The original text channel the bot was summoned with
 		self.song_deque = deque()				#Queue of songs to play
 
@@ -107,7 +113,6 @@ class DSSClient(discord.Client):
 	#Usually after login is successful and the Client.guilds and co. are filled up.
 	async def on_ready(self):
 		self.voice_connection_infos = []
-
 		print("Logged in as %s" % self.user)
 
 	#Called when someone begins typing a message
@@ -133,6 +138,10 @@ class DSSClient(discord.Client):
 						break
 
 			#This regex defines the syntax of a legal bot command
+			#in English: 
+			#"one or more spaces followed by
+			# a group defined by any number of non-space characters followed by
+			# zero or more spaces followed by a group defined by any number of any character"
 			res = re.match(r"\s+([^\s]+)\s*(.*)", message.content[len(prelude):])
 
 			#Passes if the user's message is syntactically correct
@@ -157,12 +166,13 @@ class DSSClient(discord.Client):
 								self.voice_connection_infos.append(voice_info)
 								break
 
+					#Everything after the command is interpreted as the url/query
 					thing_to_play = res.group(2)
 					if not voice_info.voice_client.is_playing() and len(voice_info.song_deque) == 0:
 						voice_info.song_deque.append(thing_to_play)
 						await advance_song_queue(self, voice_info)
 					else:
-						if re.search(r"^http[s]?://", thing_to_play):
+						if re.search(URL_REGEX, thing_to_play):
 							voice_info.song_deque.append(thing_to_play)
 							await voice_info.message_channel.send("Queued: %s" % thing_to_play)
 						else:
@@ -217,6 +227,8 @@ class DSSClient(discord.Client):
 					
 				else:
 					await channel.send("Unrecognized command: \"%s\"\nuse \"!dss ?\" to display the manual" % command)
+			else:
+				print("didn't match syntax")
 
 	#Called when a message is edited
 	async def on_message_edit(self, before, after):
@@ -257,7 +269,7 @@ def main():
 		exit(0)
 
 	#This dicord.Client derived object creates and maintains an asyncio loop
-	#which asynchronously dispatches the overridden methods when the relevant events occur
+	#which asynchronously dispatches the overridden methods when the relevant event occur
 	DSSClient().run(bot_key)
 
 #Standard entry point guard
