@@ -99,110 +99,118 @@ class DSSClient(discord.Client):
 
 	#Called when a message is sent in a guild of which the bot is a member
 	async def on_message(self, message):
-		#Most messages will make this statement false
-		if message.content[0:len(self.prelude)].lower() == self.prelude:
-			author = message.author
-			channel = message.channel
+		#Most messages will trigger this early exit
+		if message.content[0:len(self.prelude)].lower() != self.prelude:
+			return
 
-			print("%s said:\n\t\"%s\"" % (author.name, message.content))
+		author = message.author
+		channel = message.channel
 
-			#Check if we already have a voice client in the author's channel
-			#voice_client becomes None if we don't
-			voice_info = None
-			if author.voice != None:
-				for info in self.voice_connection_infos:
-					if author.voice.channel.id == info.voice_client.channel.id:
-						voice_info = info
+		print("%s said:\n\t\"%s\"" % (author.name, message.content))
+
+		#Check if we already have a voice client in the author's channel
+		#voice_client becomes None if we don't
+		voice_info = None
+		if author.voice != None:
+			for info in self.voice_connection_infos:
+				if author.voice.channel.id == info.voice_client.channel.id:
+					voice_info = info
+					break
+
+		#This regex defines the syntax of a legal bot command
+		#in English: 
+		#"one or more spaces followed by
+		# a group defined by any number of non-space characters followed by
+		# zero or more spaces followed by a group defined by any number of any character"
+		res = re.match(r"\s+([^\s]+)\s*(.*)", message.content[len(self.prelude):])
+
+		#Early exit if the message is not a valid command
+		if not res:
+			print("didn't match syntax")
+			return
+
+		print("\tsyntax matched")
+		command = res.group(1).lower()	#Convert to lowercase to make command input case-insensitive
+		args = res.group(2).split(" ")	#Split on whitespace to get an array of arguments
+
+		#Play command
+		if command in play_keywords:
+			#Early exit if the message author 
+			if author.voice == None:
+				await channel.send("<@%s> You must be in a voice channel to summon me." % author.id)
+				return
+
+			#If we're not in the message author's voice channel
+			if voice_info == None:
+				for guild_channel in message.guild.channels:
+					if guild_channel.id == author.voice.channel.id:
+						await channel.send("Joining voice channel \"%s\"..." % guild_channel.name)
+						voice_info = VoiceConnectionInfo(channel, await guild_channel.connect())
+						await message.guild.change_voice_state(channel=voice_info.voice_client.channel, self_mute=False, self_deaf=True)
+						self.voice_connection_infos.append(voice_info)
 						break
 
-			#This regex defines the syntax of a legal bot command
-			#in English: 
-			#"one or more spaces followed by
-			# a group defined by any number of non-space characters followed by
-			# zero or more spaces followed by a group defined by any number of any character"
-			res = re.match(r"\s+([^\s]+)\s*(.*)", message.content[len(self.prelude):])
-
-			#Passes if the user's message is syntactically correct
-			if res:
-				print("\tsyntax matched")
-				command = res.group(1).lower()	#Convert to lowercase to make command input case-insensitive
-				args = res.group(2).split(" ")	#Split on whitespace to get an array of arguments
-
-				if command in play_keywords:
-					#Early exit if the message author 
-					if author.voice == None:
-						await channel.send("<@%s> You must be in a voice channel to summon me." % author.id)
-						return
-
-					#If we're not in the message author's voice channel
-					if voice_info == None:
-						for guild_channel in message.guild.channels:
-							if guild_channel.id == author.voice.channel.id:
-								await channel.send("Joining voice channel \"%s\"..." % guild_channel.name)
-								voice_info = VoiceConnectionInfo(channel, await guild_channel.connect())
-								await message.guild.change_voice_state(channel=voice_info.voice_client.channel, self_mute=False, self_deaf=True)
-								self.voice_connection_infos.append(voice_info)
-								break
-
-					#Everything after the command is interpreted as the url/query
-					thing_to_play = res.group(2)
-					if not voice_info.voice_client.is_playing() and len(voice_info.song_deque) == 0:
-						voice_info.song_deque.append(thing_to_play)
-						await self.advance_song_queue(voice_info)
-					else:
-						if re.search(URL_REGEX, thing_to_play):
-							voice_info.song_deque.append(thing_to_play)
-							await voice_info.message_channel.send("Queued: %s" % thing_to_play)
-						else:
-							await voice_info.message_channel.send("Searching for \"%s\"..." % thing_to_play)
-							link = url_from_query(thing_to_play)
-							voice_info.song_deque.append(link)
-							await voice_info.message_channel.send("Queued: %s" % link)
-
-				elif command in skip_keywords:
-					if voice_info == None:
-						await channel.send("<@%s> I'm not playing anything" % author.id)
-						return
-
-					if voice_info.voice_client.is_playing():
-						await channel.send("Skipping...")
-						voice_info.voice_client.stop()
-					else:
-						await channel.send("<@%s> I'm not playing anything" % author.id)
-
-				elif command in pause_keywords:
-					if voice_info == None:
-						await channel.send("<@%s> I'm not playing anything" % author.id)
-						return
-
-					vc = voice_info.voice_client
-					if vc.is_playing():
-						await channel.send("Pausing...")
-						vc.pause()
-					elif vc.is_paused():
-						await channel.send("Resuming...")
-						vc.resume()
-
-				elif command in disconnect_keywords:
-					if author.voice == None:
-						await channel.send("<@%s> You can't disconnect me when we're not in the same room." % author.id)
-						return
-
-					if voice_info == None:
-						await channel.send("<@%s> I'm not even connected to a voice channel." % author.id)
-					else:
-						await channel.send("Disconnecting...")
-						voice_info.voice_client.stop()
-						await voice_info.voice_client.disconnect()
-						self.voice_connection_infos.remove(voice_info)
-
-				elif command in help_keywords:
-					await channel.send(man_message)
-					
-				else:
-					await channel.send("Unrecognized command: \"%s\"\nuse \"!dss ?\" to display the manual" % command)
+			#Everything after the command is interpreted as the url/query
+			thing_to_play = res.group(2)
+			if not voice_info.voice_client.is_playing() and len(voice_info.song_deque) == 0:
+				voice_info.song_deque.append(thing_to_play)
+				await self.advance_song_queue(voice_info)
 			else:
-				print("didn't match syntax")
+				if re.search(URL_REGEX, thing_to_play):
+					voice_info.song_deque.append(thing_to_play)
+					await voice_info.message_channel.send("Queued: %s" % thing_to_play)
+				else:
+					await voice_info.message_channel.send("Searching for \"%s\"..." % thing_to_play)
+					link = url_from_query(thing_to_play)
+					voice_info.song_deque.append(link)
+					await voice_info.message_channel.send("Queued: %s" % link)
+
+		#Skip command
+		elif command in skip_keywords:
+			if voice_info == None:
+				await channel.send("<@%s> I'm not playing anything" % author.id)
+				return
+
+			if voice_info.voice_client.is_playing():
+				await channel.send("Skipping...")
+				voice_info.voice_client.stop()
+			else:
+				await channel.send("<@%s> I'm not playing anything" % author.id)
+
+		#Pause command
+		elif command in pause_keywords:
+			if voice_info == None:
+				await channel.send("<@%s> I'm not playing anything" % author.id)
+				return
+
+			vc = voice_info.voice_client
+			if vc.is_playing():
+				await channel.send("Pausing...")
+				vc.pause()
+			elif vc.is_paused():
+				await channel.send("Resuming...")
+				vc.resume()
+
+		#Disconnect command
+		elif command in disconnect_keywords:
+			if author.voice == None:
+				await channel.send("<@%s> You can't disconnect me when we're not in the same room." % author.id)
+				return
+
+			if voice_info == None:
+				await channel.send("<@%s> I'm not even connected to a voice channel." % author.id)
+			else:
+				await channel.send("Disconnecting...")
+				voice_info.voice_client.stop()
+				await voice_info.voice_client.disconnect()
+				self.voice_connection_infos.remove(voice_info)
+
+		#Help command
+		elif command in help_keywords:
+			await channel.send(man_message)
+			
+		else:
+			await channel.send("Unrecognized command: \"%s\"\nuse \"!dss ?\" to display the manual" % command)
 
 	#Called when a message is edited
 	async def on_message_edit(self, before, after):
