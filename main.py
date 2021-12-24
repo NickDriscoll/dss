@@ -191,7 +191,9 @@ class DSSClient(discord.Client):
 
 	#Called when a message is edited
 	async def on_message_edit(self, before, after):
-		print("Message edited: %s" % (before.id))
+		if before.content != after.content:
+			print("Message edited:\n \t\"%s\"\n\tto\n\t\"%s\"" % (before.content, after.content))
+			await self.on_message(after)
 
 	#Begin playing the audio from the video at link through voice_client
 	def play_audio_url(self, voice_client, link):
