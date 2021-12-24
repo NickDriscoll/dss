@@ -5,7 +5,7 @@ import asyncio, discord, pafy, re, sys
 from collections import deque
 from youtubesearchpython import VideosSearch
 
-#In the same directory as this main.py, keys.py shall contain a structure like this
+#In the same directory as this main.py, keys.py contains a structure like this
 #auth_keys = {
 #	"bot_token" : "tokengoeshere",
 #	"bot_token_dev" : "devbottokenid",
@@ -14,10 +14,6 @@ from youtubesearchpython import VideosSearch
 from keys import auth_keys
 
 #-----Helper functions-----
-
-def list_fields(ob):
-	for i in dir(ob):
-		print(i)
 
 #Returns a pretty-printed dictionary
 def format_dict(d, indent=0):
@@ -41,10 +37,6 @@ def format_dicts(ds, indent=0):
 def print_dict(d, indent=0):
 	print(format_dict(d, indent))
 
-def print_dicts(ds):
-	for d in ds:
-		print_dict(d)
-
 #--------------------------
 
 #The valid keywords to trigger each command
@@ -58,7 +50,7 @@ help_keywords = ["?", "h", "help"]
 #Define the manual message
 dash_count = 30
 man_message = "%s**D**riscoll's **S**ound **S**treamer%s\n\n" % ('-'*dash_count, '-'*dash_count)
-man_message += "I am a music bot that can stream audio from a YouTube video given a direct URL or search query.\n\n"
+man_message += "I am a music bot that can stream sound from a YouTube video given a direct URL or search query.\n\n"
 man_message += "\tTo summon me to play/queue something:\n\t\t\"!dss play|p <url or query>\"\n"
 man_message += "\tTo skip to the next queued track:\n\t\t\"!dss n|next|s|skip\"\n"
 man_message += "\tTo toggle music playback (pausing):\n\t\t\"!dss pause|unpause\"\n"
@@ -69,11 +61,7 @@ man_message += "\n\tContact <@%s> to report any issues or bugs." % auth_keys["bo
 #Regex used to determine if a string is a URL
 URL_REGEX = r"^http[s]?://"
 
-def play_audio_url(client, voice_client, link):
-	stream_url = pafy.new(link).getbestaudio().url
-	audio_source = discord.FFmpegPCMAudio(stream_url)
-	voice_client.play(audio_source, after=client.after_audio)
-
+#Returns the first url given the search query
 def url_from_query(query):
 	search = VideosSearch(query, limit=1)
 	search_results = search.result()["result"]
@@ -82,21 +70,6 @@ def url_from_query(query):
 	else:
 		result = search_results[0]
 		return result["link"]
-
-async def advance_song_queue(client, voice_info):
-	if len(voice_info.song_deque) > 0:
-		thing_to_play = voice_info.song_deque.popleft()
-		if re.search(URL_REGEX, thing_to_play):
-			play_audio_url(client, voice_info.voice_client, thing_to_play)
-			await voice_info.message_channel.send("Now playing: %s" % thing_to_play)
-		else:
-			await voice_info.message_channel.send("Searching for \"%s\"..." % thing_to_play)
-			link = url_from_query(thing_to_play)
-			if link == None:
-				await voice_info.message_channel.send("Found no video results for that query. Sorry.")
-			else:
-				play_audio_url(client, voice_info.voice_client, link)
-				await voice_info.message_channel.send("Now playing: %s" % link)
 
 #An instance of this class holds all the data
 #for an active voice connection
@@ -109,10 +82,15 @@ class VoiceConnectionInfo:
 #This is the main class that subclasses Client
 #Each overridden method represents a Discord event we want to respond to
 class DSSClient(discord.Client):
+	#Custom constructor so we can avoid making the prelude a global variable
+	def __init__(self, prelude):
+		self.prelude = prelude				#Message start that signals it's a command for us to interpret
+		self.voice_connection_infos = []	#List keeping track of data for each active voice connection
+		super().__init__()					#Call the base class's constructor to make sure init happens correctly
+
 	#Called when the client is done preparing the data received from Discord.
 	#Usually after login is successful and the Client.guilds and co. are filled up.
 	async def on_ready(self):
-		self.voice_connection_infos = []
 		print("Logged in as %s" % self.user)
 
 	#Called when someone begins typing a message
@@ -122,7 +100,7 @@ class DSSClient(discord.Client):
 	#Called when a message is sent in a guild of which the bot is a member
 	async def on_message(self, message):
 		#Most messages will make this statement false
-		if message.content[0:len(prelude)].lower() == prelude:
+		if message.content[0:len(self.prelude)].lower() == self.prelude:
 			author = message.author
 			channel = message.channel
 
@@ -142,7 +120,7 @@ class DSSClient(discord.Client):
 			#"one or more spaces followed by
 			# a group defined by any number of non-space characters followed by
 			# zero or more spaces followed by a group defined by any number of any character"
-			res = re.match(r"\s+([^\s]+)\s*(.*)", message.content[len(prelude):])
+			res = re.match(r"\s+([^\s]+)\s*(.*)", message.content[len(self.prelude):])
 
 			#Passes if the user's message is syntactically correct
 			if res:
@@ -170,7 +148,7 @@ class DSSClient(discord.Client):
 					thing_to_play = res.group(2)
 					if not voice_info.voice_client.is_playing() and len(voice_info.song_deque) == 0:
 						voice_info.song_deque.append(thing_to_play)
-						await advance_song_queue(self, voice_info)
+						await self.advance_song_queue(voice_info)
 					else:
 						if re.search(URL_REGEX, thing_to_play):
 							voice_info.song_deque.append(thing_to_play)
@@ -205,10 +183,6 @@ class DSSClient(discord.Client):
 						await channel.send("Resuming...")
 						vc.resume()
 
-				elif command == "debug":
-					await message.channel.send("Gotcha")
-					print(str(message))
-
 				elif command in disconnect_keywords:
 					if author.voice == None:
 						await channel.send("<@%s> You can't disconnect me when we're not in the same room." % author.id)
@@ -234,6 +208,28 @@ class DSSClient(discord.Client):
 	async def on_message_edit(self, before, after):
 		print("Message edited: %s" % (before.id))
 
+	#Begin playing the audio from the video at link through voice_client
+	def play_audio_url(self, voice_client, link):
+		stream_url = pafy.new(link).getbestaudio().url
+		audio_source = discord.FFmpegPCMAudio(stream_url)
+		voice_client.play(audio_source, after=self.after_audio)
+
+	#Advances to the next song in voice_info's queue
+	async def advance_song_queue(self, voice_info):
+		if len(voice_info.song_deque) > 0:
+			thing_to_play = voice_info.song_deque.popleft() #Dequeue
+			if re.search(URL_REGEX, thing_to_play):
+				self.play_audio_url(voice_info.voice_client, thing_to_play)
+				await voice_info.message_channel.send("Now playing: %s" % thing_to_play)
+			else:
+				await voice_info.message_channel.send("Searching for \"%s\"..." % thing_to_play)
+				link = url_from_query(thing_to_play)
+				if link == None:
+					await voice_info.message_channel.send("Found no video results for that query. Sorry.")
+				else:
+					self.play_audio_url(voice_info.voice_client, link)
+					await voice_info.message_channel.send("Now playing: %s" % link)
+
 	#Callback that is called when an AudioSource is exhausted or has an error
 	def after_audio(self, error):
 		if error != None:
@@ -243,21 +239,21 @@ class DSSClient(discord.Client):
 		#queue on the ones that need advancing
 		for info in self.voice_connection_infos:
 			if not info.voice_client.is_playing():
-				asyncio.ensure_future(advance_song_queue(self, info), loop=self.loop)
+				asyncio.ensure_future(self.advance_song_queue(info), loop=self.loop)
 
 #Entry point
 def main():
 	#Getting environment arg
 	if len(sys.argv) < 2:
-		print("You must pass either \"dev\" or \"prod\" as a parameter")
+		print("Usage: \"python3 main.py <dev or prod>\"")
 		exit(0)
 	env = sys.argv[1]
 
 	print("Logging in...")
 
 	#Configure environment related variables
-	global prelude 				#Beginning part of message that lets us to know it's a command for us to interpret
 	bot_key = ""				#Secret token that authenticates the script to the bot account
+	prelude = ""				#Message start that signals it's a command for us to interpret
 	if env == "prod":
 		bot_key = auth_keys["bot_token"]
 		prelude = "!dss"
@@ -265,12 +261,12 @@ def main():
 		bot_key = auth_keys["bot_token_dev"]
 		prelude = "!dssd"
 	else:
-		print("You must pass either \"dev\" or \"prod\" as a parameter")
+		print("The argument must be one of \"dev\" or \"prod\"")
 		exit(0)
 
 	#This dicord.Client derived object creates and maintains an asyncio loop
 	#which asynchronously dispatches the overridden methods when the relevant event occur
-	DSSClient().run(bot_key)
+	DSSClient(prelude).run(bot_key)
 
 #Standard entry point guard
 if __name__ == "__main__":
