@@ -48,7 +48,7 @@ def url_from_query(query):
 #An instance of this class holds all the data for an active voice connection
 class VoiceConnectionInfo:
 	def __init__(self, message_channel, voice_client):
-		self.voice_client = voice_client		#Voice client to 
+		self.voice_client = voice_client		#Voice client to stream to
 		self.message_channel = message_channel	#The original text channel the bot was summoned with
 		self.song_deque = deque()				#Queue of songs to play
 
@@ -59,7 +59,7 @@ class DSSClient(discord.Client):
 	def __init__(self, prelude):
 		self.prelude = prelude				#Message start that signals it's a command for us to interpret
 		self.voice_connection_infos = []	#List keeping track of data for each active voice connection
-		super().__init__()					#Call the base class's constructor to make sure init happens correctly
+		super().__init__()					#Call the base class's constructor to make sure client init happens correctly
 
 	#Called when the client is done preparing the data received from Discord.
 	#Usually after login is successful and the Client.guilds and co. are filled up.
@@ -129,6 +129,10 @@ class DSSClient(discord.Client):
 
 			#Everything after the command is interpreted as the url/query
 			thing_to_play = res.group(2)
+			if len(thing_to_play) == 0:
+				await voice_info.message_channel.send("<@%s> You need to pass a url or search query to the play command." % author.id)
+				return
+
 			if not voice_info.voice_client.is_playing() and len(voice_info.song_deque) == 0:
 				voice_info.song_deque.append(thing_to_play)
 				await self.advance_song_queue(voice_info)
@@ -233,7 +237,7 @@ def main():
 	#Getting environment arg
 	if len(sys.argv) < 2:
 		print("Usage: \"python3 main.py <dev or prod>\"")
-		exit(0)
+		return
 	env = sys.argv[1]
 
 	print("Logging in...")
@@ -249,7 +253,7 @@ def main():
 		prelude = "!dssd"
 	else:
 		print("The argument must be one of \"dev\" or \"prod\"")
-		exit(0)
+		return
 
 	#This dicord.Client derived object creates and maintains an asyncio loop
 	#which asynchronously dispatches the overridden methods when the relevant event occur
