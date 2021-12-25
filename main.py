@@ -45,6 +45,10 @@ def url_from_query(query):
 		result = search_results[0]
 		return result["link"]
 
+async def send_and_print(channel, message):
+	print(message)
+	await channel.send(message)
+
 #An instance of this class holds all the data for an active voice connection
 class VoiceConnectionInfo:
 	def __init__(self, message_channel, voice_client):
@@ -79,10 +83,10 @@ class DSSClient(discord.Client):
 		author = message.author
 		channel = message.channel
 
-		print("%s said:\n\t\"%s\"" % (author.name, message.content))
+		#We print every message that matches the prelude for debugging purposes
+		print("%s said \"%s\"" % (author.name, message.content))
 
 		#Check if we already have a voice client in the author's channel
-		#voice_client becomes None if we don't
 		voice_info = None
 		if author.voice != None:
 			for info in self.voice_connection_infos:
@@ -102,22 +106,20 @@ class DSSClient(discord.Client):
 			print("didn't match syntax")
 			return
 
-		print("\tsyntax matched")
 		command = res.group(1).lower()	#Convert to lowercase to make command input case-insensitive
-		args = res.group(2).split(" ")	#Split on whitespace to get an array of arguments
 
 		#Play command
 		if command in play_keywords:
-			#Early exit if the message author 
+			#Early exit if the message author isn't in a voice channel
 			if author.voice == None:
-				await channel.send("<@%s> You must be in a voice channel to summon me." % author.id)
+				await send_and_print(channel, "<@%s> You must be in a voice channel to summon me." % author.id)
 				return
 
 			#If we're not in the message author's voice channel, join it
 			if voice_info == None:
 				for guild_channel in message.guild.channels:
 					if guild_channel.id == author.voice.channel.id:
-						await channel.send("Joining voice channel \"%s\"..." % guild_channel.name)
+						await send_and_print(channel, "Joining voice channel \"%s\"..." % guild_channel.name)
 
 						#Initialize voice connection info
 						voice_info = VoiceConnectionInfo(channel, await guild_channel.connect())
@@ -139,12 +141,12 @@ class DSSClient(discord.Client):
 			else:
 				if re.search(URL_REGEX, thing_to_play):
 					voice_info.song_deque.append(thing_to_play)
-					await voice_info.message_channel.send("Queued: %s" % thing_to_play)
+					await send_and_print(voice_info.message_channel, "Queued: %s" % thing_to_play)
 				else:
 					await voice_info.message_channel.send("Searching for \"%s\"..." % thing_to_play)
 					link = url_from_query(thing_to_play)
 					voice_info.song_deque.append(link)
-					await voice_info.message_channel.send("Queued: %s" % link)
+					await send_and_print(voice_info.message_channel, "Queued: %s" % link)
 
 		#Skip command
 		elif command in skip_keywords:
@@ -181,7 +183,7 @@ class DSSClient(discord.Client):
 			if voice_info == None:
 				await channel.send("<@%s> I'm not even connected to a voice channel." % author.id)
 			else:
-				await channel.send("Disconnecting...")
+				await send_and_print(channel, "Disconnecting...")
 				voice_info.voice_client.stop()
 				await voice_info.voice_client.disconnect()
 				self.voice_connection_infos.remove(voice_info)
@@ -189,6 +191,7 @@ class DSSClient(discord.Client):
 		#Help command
 		elif command in help_keywords:
 			await channel.send(man_message)
+			print("Displayed help manual.")
 			
 		else:
 			await channel.send("Unrecognized command: \"%s\"\nuse \"!dss ?\" to display the manual" % command)
@@ -211,15 +214,15 @@ class DSSClient(discord.Client):
 			thing_to_play = voice_info.song_deque.popleft() #Dequeue
 			if re.search(URL_REGEX, thing_to_play):
 				self.play_audio_url(voice_info.voice_client, thing_to_play)
-				await voice_info.message_channel.send("Now playing: %s" % thing_to_play)
+				await send_and_print(voice_info.message_channel, "Now playing: %s" % thing_to_play)
 			else:
-				await voice_info.message_channel.send("Searching for \"%s\"..." % thing_to_play)
+				await send_and_print(voice_info.message_channel, "Searching for \"%s\"..." % thing_to_play)
 				link = url_from_query(thing_to_play)
 				if link == None:
-					await voice_info.message_channel.send("Found no video results for that query. Sorry.")
+					await send_and_print(voice_info.message_channel, "Found no video results for that query. Sorry.")
 				else:
 					self.play_audio_url(voice_info.voice_client, link)
-					await voice_info.message_channel.send("Now playing: %s" % link)
+					await send_and_print(voice_info.message_channel, "Now playing: %s" % link)
 
 	#Callback that is called when an AudioSource is exhausted or has an error
 	def after_audio(self, error):
@@ -240,8 +243,6 @@ def main():
 		return
 	env = sys.argv[1]
 
-	print("Logging in...")
-
 	#Configure environment related variables
 	bot_key = ""				#Secret token that authenticates the script to the bot account
 	prelude = ""				#Message start that signals it's a command for us to interpret
@@ -256,7 +257,8 @@ def main():
 		return
 
 	#This dicord.Client derived object creates and maintains an asyncio loop
-	#which asynchronously dispatches the overridden methods when the relevant event occur
+	#which asynchronously dispatches the overridden methods when the relevant events occur
+	print("Logging in...")
 	DSSClient(prelude).run(bot_key)
 
 #Standard entry point guard
