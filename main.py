@@ -18,18 +18,29 @@ play_keywords = ["p", "play"]
 pause_keywords = ["pause", "unpause"]
 skip_keywords = ["n", "next", "s", "skip"]
 lyrics_keywords = ["l", "lyrics"]
-disconnect_keywords = ["d", "disc", "disconnect"]
+disconnect_keywords = ["d", "disc", "disconnect", "stop"]
 help_keywords = ["?", "h", "help"]
+
+def format_keywords(keywords):
+	res = ""
+	first = True
+	for word in keywords:
+		if first:
+			first = False
+			res = word
+		else:
+			res += "|%s" % word
+	return res
 
 #Define the manual message
 dash_count = 30
 man_message = "%s**D**riscoll's **S**ound **S**treamer%s\n\n" % ('-'*dash_count, '-'*dash_count)
 man_message += "I am a music bot that can stream sound from a YouTube video given a direct URL or search query.\n\n"
-man_message += "\tTo summon me to play/queue something:\n\t\t\"!dss play|p <url or query>\"\n"
-man_message += "\tTo skip to the next queued track:\n\t\t\"!dss n|next|s|skip\"\n"
-man_message += "\tTo toggle music playback (pausing):\n\t\t\"!dss pause|unpause\"\n"
-man_message += "\tTo expel me from the channel you're in:\n\t\t\"!dss d|disc|disconnect\"\n"
-man_message += "\tTo display this very help message:\n\t\t\"!dss ?|h|help\"\n"
+man_message += "\tTo summon me to play/queue something:\n\t\t\"!dss %s <url or query>\"\n" % format_keywords(play_keywords)
+man_message += "\tTo skip to the next queued track:\n\t\t\"!dss %s\"\n" % format_keywords(skip_keywords)
+man_message += "\tTo toggle music playback (pausing):\n\t\t\"!dss %s\"\n" % format_keywords(pause_keywords)
+man_message += "\tTo expel me from the channel you're in:\n\t\t\"!dss %s\"\n" % format_keywords(disconnect_keywords)
+man_message += "\tTo display this help message:\n\t\t\"!dss %s\"\n" % format_keywords(help_keywords)
 man_message += "\n\tContact <@%s> to report any issues or bugs." % auth_keys["bot_author_id"]
 
 #Regex used to determine if a string is a URL
@@ -74,17 +85,30 @@ class DSSClient(discord.Client):
 	async def on_typing(self, channel, user, when):
 		print("%s started typing in \"%s/%s\" at %s" % (user.name, channel.guild.name, channel.name, when.now()))
 
-	#Called when a message is sent in a guild of which the bot is a member
+	#Called when a message is sent in a guild (server) of which the bot is a member
 	async def on_message(self, message):
+		author = message.author
+		channel = message.channel
+
 		#Most messages will trigger this early exit
 		if message.content[0:len(self.prelude)].lower() != self.prelude:
 			return
 
-		author = message.author
-		channel = message.channel
+		if self.user.id != author.id:
+			print("%s said \"%s\"" % (author.name, message.content))
 
-		#We print every message that matches the prelude for debugging purposes
-		print("%s said \"%s\"" % (author.name, message.content))
+		#This regex defines the syntax of a legal bot command
+		#in English: 
+		#"one or more spaces followed by
+		# a group defined by any number of non-space characters followed by
+		# zero or more spaces followed by a group defined by any number of any characters"
+		syntax_regex = r"\s+([^\s]+)\s*(.*)"
+
+		#Early exit if the message is not a valid command
+		res = re.match(syntax_regex, message.content[len(self.prelude):])
+		if not res:
+			print("didn't match syntax")
+			return
 
 		#Check if we already have a voice client in the author's channel
 		voice_info = None
@@ -93,18 +117,6 @@ class DSSClient(discord.Client):
 				if author.voice.channel.id == info.voice_client.channel.id:
 					voice_info = info
 					break
-
-		#This regex defines the syntax of a legal bot command
-		#in English: 
-		#"one or more spaces followed by
-		# a group defined by any number of non-space characters followed by
-		# zero or more spaces followed by a group defined by any number of any character"
-		res = re.match(r"\s+([^\s]+)\s*(.*)", message.content[len(self.prelude):])
-
-		#Early exit if the message is not a valid command
-		if not res:
-			print("didn't match syntax")
-			return
 
 		command = res.group(1).lower()	#Convert to lowercase to make command input case-insensitive
 
@@ -181,7 +193,7 @@ class DSSClient(discord.Client):
 				return
 
 			if voice_info == None:
-				await channel.send("<@%s> I'm not even connected to a voice channel." % author.id)
+				await channel.send("<@%s> I'm not even connected to your voice channel." % author.id)
 			else:
 				await send_and_print(channel, "Disconnecting...")
 				voice_info.voice_client.stop()
@@ -194,12 +206,11 @@ class DSSClient(discord.Client):
 			print("Displayed help manual.")
 			
 		else:
-			await channel.send("Unrecognized command: \"%s\"\nuse \"!dss ?\" to display the manual" % command)
+			await channel.send("Unrecognized command \"%s\"\nuse \"!dss ?\" to display the manual" % command)
 
 	#Called when a message is edited
 	async def on_message_edit(self, before, after):
 		if before.content != after.content:
-			print("Message edited:\n \t\"%s\"\n\tto\n\t\"%s\"" % (before.content, after.content))
 			await self.on_message(after)
 
 	#Begin playing the audio from the video at link through voice_client
@@ -207,6 +218,17 @@ class DSSClient(discord.Client):
 		stream_url = pafy.new(link).getbestaudio().url
 		audio_source = discord.FFmpegPCMAudio(stream_url)
 		voice_client.play(audio_source, after=self.after_audio)
+
+	#Callback that is called when an AudioSource is exhausted or has an error
+	def after_audio(self, error):
+		if error != None:
+			print("after_audio error: %s" % error)
+
+		#Go through all open voice connections and advance the
+		#queue on the ones that need advancing
+		for info in self.voice_connection_infos:
+			if not info.voice_client.is_playing():
+				asyncio.ensure_future(self.advance_song_queue(info), loop=self.loop)
 
 	#Advances to the next song in voice_info's queue
 	async def advance_song_queue(self, voice_info):
@@ -223,17 +245,6 @@ class DSSClient(discord.Client):
 				else:
 					self.play_audio_url(voice_info.voice_client, link)
 					await send_and_print(voice_info.message_channel, "Now playing: %s" % link)
-
-	#Callback that is called when an AudioSource is exhausted or has an error
-	def after_audio(self, error):
-		if error != None:
-			print("after_audio error: %s" % error)
-
-		#Go through all open voice connections and advance the
-		#queue on the ones that need advancing
-		for info in self.voice_connection_infos:
-			if not info.voice_client.is_playing():
-				asyncio.ensure_future(self.advance_song_queue(info), loop=self.loop)
 
 #Entry point
 def main():
