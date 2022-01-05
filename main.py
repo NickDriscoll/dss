@@ -35,12 +35,12 @@ def format_keywords(keywords):
 #Define the manual message
 dash_count = 30
 man_message = "%s**D**riscoll's **S**ound **S**treamer%s\n\n" % ('-'*dash_count, '-'*dash_count)
-man_message += "I am a music bot that can stream sound from a YouTube video given a direct URL or search query.\n\n"
-man_message += "\tTo summon me to play/queue something:\n\t\t\"!dss %s <url or query>\"\n" % format_keywords(play_keywords)
-man_message += "\tTo skip to the next queued track:\n\t\t\"!dss %s\"\n" % format_keywords(skip_keywords)
-man_message += "\tTo toggle music playback (pausing):\n\t\t\"!dss %s\"\n" % format_keywords(pause_keywords)
-man_message += "\tTo expel me from the channel you're in:\n\t\t\"!dss %s\"\n" % format_keywords(disconnect_keywords)
-man_message += "\tTo display this help message:\n\t\t\"!dss %s\"\n" % format_keywords(help_keywords)
+man_message += "I am a music bot that can stream sound from a YouTube video given a direct URL or search query.\n"
+man_message += "\n\tTo summon me to play/queue something:\n\t\t\"!dss %s <url or query>\"" % format_keywords(play_keywords)
+man_message += "\n\tTo skip to the next queued track:\n\t\t\"!dss %s\"" % format_keywords(skip_keywords)
+man_message += "\n\tTo toggle music playback (pausing):\n\t\t\"!dss %s\"" % format_keywords(pause_keywords)
+man_message += "\n\tTo expel me from the channel you're in:\n\t\t\"!dss %s\"" % format_keywords(disconnect_keywords)
+man_message += "\n\tTo display this help message:\n\t\t\"!dss %s\"" % format_keywords(help_keywords)
 man_message += "\n\tContact <@%s> to report any issues or bugs." % auth_keys["bot_author_id"]
 
 #Regex used to determine if a string is a URL
@@ -53,8 +53,7 @@ def url_from_query(query):
 	if len(search_results) == 0:
 		return None
 	else:
-		result = search_results[0]
-		return result["link"]
+		return search_results[0]["link"]
 
 async def send_and_print(channel, message):
 	print(message)
@@ -206,7 +205,7 @@ class DSSClient(discord.Client):
 			print("Displayed help manual.")
 			
 		else:
-			await channel.send("Unrecognized command \"%s\"\nuse \"!dss ?\" to display the manual" % command)
+			await channel.send("Unrecognized command \"%s\"\nuse \"!dss %s\" to display the manual" % (command, format_keywords(help_keywords)))
 
 	#Called when a message is edited
 	async def on_message_edit(self, before, after):
