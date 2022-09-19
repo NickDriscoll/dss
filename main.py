@@ -21,6 +21,11 @@ lyrics_keywords = ["l", "lyrics"]
 disconnect_keywords = ["d", "disc", "disconnect", "stop"]
 help_keywords = ["?", "h", "help"]
 
+#Examples of how to use commands
+play_example = "\"!dss p katamari mamba\", \"!dss play https://www.youtube.com/watch?v=OOhW_Qc5oiU\""
+pause_example = "\"!dss pause\", \"!dss unpause\""
+skip_example = ""
+
 def format_keywords(keywords):
 	res = ""
 	first = True
@@ -46,6 +51,9 @@ man_message += "\n\tContact <@%s> to report any issues or bugs." % auth_keys["bo
 #Regex used to determine if a string is a URL
 URL_REGEX = r"^http[s]?://"
 
+def flushed_print(message):
+	print(message, flush=True)
+
 #Returns the first url given the search query
 def url_from_query(query):
 	search = VideosSearch(query, limit=1)
@@ -56,7 +64,7 @@ def url_from_query(query):
 		return search_results[0]["link"]
 
 async def send_and_print(channel, message):
-	print(message)
+	flushed_print(message)
 	await channel.send(message)
 
 #An instance of this class holds all the data for an active voice connection
@@ -64,7 +72,7 @@ class VoiceConnectionInfo:
 	def __init__(self, message_channel, voice_client):
 		self.voice_client = voice_client		#Voice client to stream to
 		self.message_channel = message_channel	#The original text channel the bot was summoned with
-		self.song_deque = deque()				#Queue of songs to play
+		self.song_queue = deque()				#Queue of songs to play
 
 #This is the main class that subclasses Client
 #Each overridden method represents a Discord event we want to respond to
@@ -78,23 +86,24 @@ class DSSClient(discord.Client):
 	#Called when the client is done preparing the data received from Discord.
 	#Usually after login is successful and the Client.guilds and co. are filled up.
 	async def on_ready(self):
-		print("Logged in as %s" % self.user)
+		flushed_print("Logged in as %s" % self.user)
 
 	#Called when someone begins typing a message
 	async def on_typing(self, channel, user, when):
-		print("%s started typing in \"%s/%s\" at %s" % (user.name, channel.guild.name, channel.name, when.now()))
+		flushed_print("\"%s\" started typing in \"%s/%s\" at %s" % (user.name, channel.guild.name, channel.name, when.now()))
 
 	#Called when a message is sent in a guild (server) of which the bot is a member
 	async def on_message(self, message):
 		author = message.author
 		channel = message.channel
 
-		#Most messages will trigger this early exit
+		if self.user.id != author.id:
+			flushed_print("\"%s\" said \"%s\"" % (author.name, message.content))
+
+		#Early exit if the first few characters of the message don't match the bot's prelude
+		#Most messages will trigger this
 		if message.content[0:len(self.prelude)].lower() != self.prelude:
 			return
-
-		if self.user.id != author.id:
-			print("%s said \"%s\"" % (author.name, message.content))
 
 		#This regex defines the syntax of a legal bot command
 		#in English: 
@@ -106,7 +115,7 @@ class DSSClient(discord.Client):
 		#Early exit if the message is not a valid command
 		res = re.match(syntax_regex, message.content[len(self.prelude):])
 		if not res:
-			print("didn't match syntax")
+			flushed_print("didn't match syntax")
 			return
 
 		#Check if we already have a voice client in the author's channel
@@ -117,6 +126,7 @@ class DSSClient(discord.Client):
 					voice_info = info
 					break
 
+		#The first group of the regex captures the command
 		command = res.group(1).lower()	#Convert to lowercase to make command input case-insensitive
 
 		#Play command
@@ -146,17 +156,17 @@ class DSSClient(discord.Client):
 				await voice_info.message_channel.send("<@%s> You need to pass a url or search query to the play command." % author.id)
 				return
 
-			if not voice_info.voice_client.is_playing() and len(voice_info.song_deque) == 0:
-				voice_info.song_deque.append(thing_to_play)
+			if not voice_info.voice_client.is_playing() and len(voice_info.song_queue) == 0:
+				voice_info.song_queue.append(thing_to_play)
 				await self.advance_song_queue(voice_info)
 			else:
 				if re.search(URL_REGEX, thing_to_play):
-					voice_info.song_deque.append(thing_to_play)
+					voice_info.song_queue.append(thing_to_play)
 					await send_and_print(voice_info.message_channel, "Queued: %s" % thing_to_play)
 				else:
 					await voice_info.message_channel.send("Searching for \"%s\"..." % thing_to_play)
 					link = url_from_query(thing_to_play)
-					voice_info.song_deque.append(link)
+					voice_info.song_queue.append(link)
 					await send_and_print(voice_info.message_channel, "Queued: %s" % link)
 
 		#Skip command
@@ -202,7 +212,7 @@ class DSSClient(discord.Client):
 		#Help command
 		elif command in help_keywords:
 			await channel.send(man_message)
-			print("Displayed help manual.")
+			flushed_print("Displayed help manual.")
 			
 		else:
 			await channel.send("Unrecognized command \"%s\"\nuse \"!dss %s\" to display the manual" % (command, format_keywords(help_keywords)))
@@ -221,7 +231,7 @@ class DSSClient(discord.Client):
 	#Callback that is called when an AudioSource is exhausted or has an error
 	def after_audio(self, error):
 		if error != None:
-			print("after_audio error: %s" % error)
+			flushed_print("after_audio error: %s" % error)
 
 		#Go through all open voice connections and advance the
 		#queue on the ones that need advancing
@@ -231,8 +241,8 @@ class DSSClient(discord.Client):
 
 	#Advances to the next song in voice_info's queue
 	async def advance_song_queue(self, voice_info):
-		if len(voice_info.song_deque) > 0:
-			thing_to_play = voice_info.song_deque.popleft() #Dequeue
+		if len(voice_info.song_queue) > 0:
+			thing_to_play = voice_info.song_queue.popleft() #Dequeue
 			if re.search(URL_REGEX, thing_to_play):
 				self.play_audio_url(voice_info.voice_client, thing_to_play)
 				await send_and_print(voice_info.message_channel, "Now playing: %s" % thing_to_play)
@@ -249,7 +259,7 @@ class DSSClient(discord.Client):
 def main():
 	#Getting environment arg
 	if len(sys.argv) < 2:
-		print("Usage: \"python3 main.py <dev or prod>\"")
+		flushed_print("Usage: \"python3 main.py <dev or prod>\"")
 		return
 	env = sys.argv[1]
 
@@ -263,12 +273,12 @@ def main():
 		bot_key = auth_keys["bot_token_dev"]
 		prelude = "!dssd"
 	else:
-		print("The argument must be one of \"dev\" or \"prod\"")
+		flushed_print("The argument must be one of \"dev\" or \"prod\"")
 		return
 
 	#This dicord.Client derived object creates and maintains an asyncio loop
 	#which asynchronously dispatches the overridden methods when the relevant events occur
-	print("Logging in...")
+	flushed_print("Logging in...")
 	DSSClient(prelude).run(bot_key)
 
 #Standard entry point guard
